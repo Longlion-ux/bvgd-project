@@ -48,6 +48,11 @@
        <string>Tài vụ</string>
       </attribute>
      </widget>
+     <widget class="QWidget" name="tab_tiep_nhan">
+      <attribute name="title">
+       <string>Tiếp nhận</string>
+      </attribute>
+     </widget>
     </widget>
    </item>
   </layout>

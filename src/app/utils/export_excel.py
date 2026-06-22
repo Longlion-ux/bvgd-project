@@ -45,17 +45,15 @@ def export_daily_report_to_excel(date_str):
 
         # --- LẤY THÔNG TIN CHUNG (Meta Data) ---
         meta = data.get('meta_data', {})
-        user_id = meta.get('user_id', '')
+        # Ép chuỗi để đảm bảo mã BN (nếu bằng số) không mất số 0
+        user_id = str(meta.get('user_id', '')) 
         user_name = meta.get('user_name', '')
 
         bills = data.get('bills', {})
 
         # --- SHEET 1: CHI TIẾT KHÁM & THUỐC (DRUG BILLS) ---
-        # Đây là nơi chứa thông tin khám lâm sàng đầy đủ nhất
         drug_bill = bills.get('drug_bill')
         if drug_bill and 'ToaThuoc' in drug_bill:
-            # Lấy thông tin sinh hiệu từ drug_bill (nếu Controller đã lưu)
-            # Lưu ý: Các key này phải khớp với key trong file JSON bạn đã lưu
             vital_signs = {
                 'Mạch (l/p)': drug_bill.get('Mach', ''),
                 'Nhiệt độ (°C)': drug_bill.get('NhietDo', ''),
@@ -69,27 +67,23 @@ def export_daily_report_to_excel(date_str):
 
             for drug in drug_bill['ToaThuoc']:
                 row = {
-                    # 1. Hành chính
                     'Mã BN': user_id,
                     'Tên Bệnh Nhân': user_name,
                     'Tuổi': drug_bill.get('Tuoi', ''),
                     'Giới Tính': drug_bill.get('GioiTinh', ''),
                     'Địa Chỉ': drug_bill.get('DiaChi', ''),
-                    'BHYT': drug_bill.get('BHYT', ''),
-                    'CCCD': drug_bill.get('CCCD', ''),
+                    'BHYT': str(drug_bill.get('BHYT', '')),
+                    'CCCD': str(drug_bill.get('CCCD', '')),
 
-                    # 2. Sinh hiệu & Lâm sàng (Thêm mới)
-                    **vital_signs,  # Bung toàn bộ dict sinh hiệu vào đây
+                    **vital_signs, 
 
                     'Chẩn Đoán': drug_bill.get('ChanDoan', ''),
                     'Bác Sĩ': drug_bill.get('TenBacSi', ''),
 
-                    # 3. Thông tin thuốc
-                    'Mã Thuốc': drug.get('MaThuoc', ''),
+                    'Mã Thuốc': str(drug.get('MaThuoc', '')),
                     'Tên Thuốc': drug.get('TenThuoc', ''),
                     'Số Lượng': drug.get('SoLuong', 0),
 
-                    # 4. Cách dùng chi tiết
                     'Sáng': drug.get('Sang', ''),
                     'Trưa': drug.get('Trua', ''),
                     'Chiều': drug.get('Chieu', ''),
@@ -103,7 +97,7 @@ def export_daily_report_to_excel(date_str):
             for group_service in service_bill['DichVu']:
                 for service in group_service['DSDichVu']:
                     row = {
-                        'Mã y tế': service_bill.get('MaYTe', ''),
+                        'Mã y tế': str(service_bill.get('MaYTe', '')),
                         'Tên Bệnh Nhân': service_bill.get('HoTen', ''),
                         'Tuổi': service_bill.get('Tuoi', ''),
                         'Giới Tính': service_bill.get('GioiTinh', ''),
@@ -112,7 +106,7 @@ def export_daily_report_to_excel(date_str):
                         'Chẩn Đoán': service_bill.get('ChanDoan', ''),
 
                         'Tên nhóm dịch vụ': group_service.get('TenNhomDichVu', ''),
-                        'Mã Dịch Vụ': service.get('MaDichVu', ''),
+                        'Mã Dịch Vụ': str(service.get('MaDichVu', '')),
                         'Tên Dịch Vụ': service.get('TenDichVu', ''),
                         'Tên Loại giá': service.get('TenLoaiGia', ''),
                         'Nơi Thực Hiện': service.get('NoiThucHien', ''),
@@ -133,7 +127,7 @@ def export_daily_report_to_excel(date_str):
                 'Tổng Tiền': invoice.get('TongTienThanhToan', 0),
                 'Hình Thức TT': invoice.get('HinhThucThanhToan', ''),
                 'Đơn Vị': invoice.get('TenDonVi', ''),
-                'MST': invoice.get('MST', '')
+                'MST': str(invoice.get('MST', ''))
             }
             list_invoices.append(row)
 
@@ -142,7 +136,6 @@ def export_daily_report_to_excel(date_str):
     df_services = pd.DataFrame(list_services)
     df_invoices = pd.DataFrame(list_invoices)
 
-    # Sắp xếp
     if not df_drugs.empty:
         df_drugs.sort_values(by=['Tên Bệnh Nhân', 'Tên Thuốc'], inplace=True)
     if not df_services.empty:
@@ -150,36 +143,29 @@ def export_daily_report_to_excel(date_str):
     if not df_invoices.empty:
         df_invoices.sort_values(by=['Tên Bệnh Nhân'], inplace=True)
 
-    # timestamp = datetime.now().strftime("%H%M%S")
     timestamp = ''
     output_filename = f"BaoCao_Ngay_{date_str}_{timestamp}.xlsx"
     output_path = os.path.join(EXPORT_DIR, output_filename)
 
     try:
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            # Sheet Thuốc
             if not df_drugs.empty:
                 df_drugs.to_excel(writer, sheet_name='Chi Tiết Thuốc & Khám', index=False)
                 _auto_adjust_column_width(writer, df_drugs, 'Chi Tiết Thuốc & Khám')
             else:
-                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Chi Tiết Thuốc & Khám',
-                                                                      index=False)
+                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Chi Tiết Thuốc & Khám', index=False)
 
-            # Sheet Dịch Vụ
             if not df_services.empty:
                 df_services.to_excel(writer, sheet_name='Chi Tiết Dịch Vụ', index=False)
                 _auto_adjust_column_width(writer, df_services, 'Chi Tiết Dịch Vụ')
             else:
-                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Chi Tiết Dịch Vụ',
-                                                                      index=False)
+                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Chi Tiết Dịch Vụ', index=False)
 
-            # Sheet Hóa Đơn
             if not df_invoices.empty:
                 df_invoices.to_excel(writer, sheet_name='Tổng Hợp Doanh Thu', index=False)
                 _auto_adjust_column_width(writer, df_invoices, 'Tổng Hợp Doanh Thu')
             else:
-                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Tổng Hợp Doanh Thu',
-                                                                      index=False)
+                pd.DataFrame({'Info': ['Không có dữ liệu']}).to_excel(writer, sheet_name='Tổng Hợp Doanh Thu', index=False)
 
         print(f"Xuất file thành công: {output_path}")
         return output_path
@@ -204,41 +190,106 @@ def _auto_adjust_column_width(writer, df, sheet_name):
 
         worksheet.column_dimensions[chr(65 + i)].width = max_len
 
+def export_tiep_nhan_to_excel(date_str=None):
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    source_path = get_file_path('data/lich_su_tiep_nhan.csv')
+    export_dir = get_file_path('data/exports')
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    if not os.path.exists(source_path):
+        return None
+
+    # Quan trọng: Thêm dtype=str để Pandas hiểu toàn bộ file là chuỗi, tránh mất số 0
+    df = pd.read_csv(source_path, dtype=str)
+    df = df.fillna('')
+    
+    # Dọn dẹp cột 'Phong' thừa trước khi xuất
+    if 'Phong' in df.columns:
+        df = df.drop(columns=['Phong'])
+
+    if 'MaYTe' in df.columns:
+        df['MaYTe'] = df['MaYTe'].astype(str).str.replace(r'\.0$', '', regex=True)
+    elif 'Mã y tế' in df.columns: 
+        df['Mã y tế'] = df['Mã y tế'].astype(str).str.replace(r'\.0$', '', regex=True)
+
+    if not df.empty and 'NgayTiepNhan' in df.columns:
+        df = df[df['NgayTiepNhan'].astype(str).str.startswith(date_str, na=False)]
+        
+    if 'STT' in df.columns:
+        df['STT'] = df['STT'].astype(str)
+        
+    if 'SoBHYT' in df.columns:
+        df['SoBHYT'] = df['SoBHYT'].astype(str).str.replace('.0', '', regex=False)
+
+    output_path = export_dir / f'tiep_nhan_{date_str}.xlsx'
+    try:
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Tiếp Nhan', index=False)
+            _auto_adjust_column_width(writer, df, 'Tiếp Nhan') if not df.empty else None
+        return str(output_path)
+    except Exception as e:
+        print(f'Lỗi xuất Excel tiếp nhận: {e}')
+        return None
+
+
 def export_excel():
     today = datetime.now().strftime("%Y-%m-%d")
     export_daily_report_to_excel(today)
 
-def export_and_show_dialog(parent_widget, date_str=None):
+
+def export_tiep_nhan_and_show_dialog(parent_widget, date_str=None):
     """
-    Hàm wrapper: Vừa xuất Excel, vừa hiển thị thông báo, vừa mở file.
-    Giúp code trong Controller ngắn gọn hơn.
-
-    :param parent_widget: Là 'self' (Controller) truyền vào để hiển thị popup
-    :param date_str: Ngày cần xuất (mặc định là hôm nay)
+    Đã sửa: Bổ sung popup giống hệt hàm `export_and_show_dialog` để có nút mở file
     """
-    if date_str is None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-
-    # 1. Gọi hàm logic xuất file (Hàm cũ)
-    file_path = export_daily_report_to_excel(date_str)
-
-    # 2. Xử lý hiển thị thông báo (UI)
+    file_path = export_tiep_nhan_to_excel(date_str)
+    
     if file_path and os.path.exists(file_path):
         msg = QMessageBox(parent_widget)
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setWindowTitle("Xuất dữ liệu thành công")
         msg.setText(f"File Excel đã được lưu tại:\n{file_path}")
 
-        # Thêm nút mở nhanh
         btn_open = msg.addButton("Mở File Ngay", QMessageBox.ButtonRole.ActionRole)
         msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
 
         msg.exec()
 
-        # Mở file nếu người dùng chọn
         if msg.clickedButton() == btn_open:
             try:
                 os.startfile(file_path)  # Chỉ chạy trên Windows
+            except Exception as e:
+                QMessageBox.warning(parent_widget, "Lỗi", f"Không thể mở file: {e}")
+        return file_path
+        
+    QMessageBox.warning(parent_widget, 'Thông báo', 'Không có dữ liệu để xuất.')
+    return None
+
+def export_and_show_dialog(parent_widget, date_str=None):
+    """
+    Hàm wrapper: Vừa xuất Excel, vừa hiển thị thông báo, vừa mở file.
+    Giúp code trong Controller ngắn gọn hơn.
+    """
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    file_path = export_daily_report_to_excel(date_str)
+
+    if file_path and os.path.exists(file_path):
+        msg = QMessageBox(parent_widget)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Xuất dữ liệu thành công")
+        msg.setText(f"File Excel đã được lưu tại:\n{file_path}")
+
+        btn_open = msg.addButton("Mở File Ngay", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
+
+        msg.exec()
+
+        if msg.clickedButton() == btn_open:
+            try:
+                os.startfile(file_path) 
             except Exception as e:
                 QMessageBox.warning(parent_widget, "Lỗi", f"Không thể mở file: {e}")
     else:

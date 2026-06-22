@@ -8,6 +8,7 @@ from app.controllers.tai_vu_controller import TaiVuTabController
 from app.ui.MainWindow import Ui_mainWidget
 # Import Controller con
 from app.controllers.kham_benh_controller import KhamBenhTabController
+from app.controllers.tiep_nhan_controller import TiepNhanTabController
 
 from app.utils.constants import CLS_CODE
 
@@ -33,6 +34,10 @@ class AppController(QtWidgets.QWidget):
 
         self.tai_vu_controller = TaiVuTabController(
             tab_widget_container=self.ui_main.tab_tai_vu
+        )
+
+        self.tiep_nhan_controller = TiepNhanTabController(
+            tab_widget_container=self.ui_main.tab_tiep_nhan
         )
 
         self._apply_tab_stylesheet()
@@ -116,6 +121,7 @@ class AppController(QtWidgets.QWidget):
         kham_benh_tab_index = 0
         dich_vu_tab_index = 1
         tai_vu_tab_index = 2
+        tiep_nhan_tab_index = 3
 
         # Chỉ xử lý nếu đang ở Tab Khám Bệnh
         if current_index == kham_benh_tab_index:
@@ -190,9 +196,24 @@ class AppController(QtWidgets.QWidget):
                 event.accept()
                 return
 
+        if current_index == tiep_nhan_tab_index:
+            if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier) and \
+                    (event.key() == QtCore.Qt.Key.Key_S):
+                self.tiep_nhan_controller.handle_save_and_print()
+                event.accept()
+                return
+        
+        if current_index == tiep_nhan_tab_index:
+            if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier) and \
+                    (event.key() == QtCore.Qt.Key.Key_N):
+                self.tiep_nhan_controller.reset_form()
+                event.accept()
+                return
+
 
         # Nếu không phải các phím trên, gọi xử lý mặc định
         super().keyPressEvent(event)
+    
 
 
     def handle_f5_shortcut(self, mode='kham_benh'):

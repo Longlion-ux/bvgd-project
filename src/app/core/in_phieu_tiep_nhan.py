@@ -1,163 +1,191 @@
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph
-from reportlab.lib.colors import HexColor
-
-# Thư viện để đăng ký font
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-import tempfile
+from datetime import datetime
 import os
 import sys
 
-# ----------------- CẤU HÌNH TIẾNG VIỆT -----------------
-# 1. Tên font sẽ sử dụng trong code
-VIET_FONT = 'TahomaVN'
-VIET_FONT_BOLD = 'TahomaVNBold'
-VIET_FONT_ITALIC = 'TahomaVNItalic'
+from reportlab.lib.pagesizes import A7, landscape
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import ParagraphStyle
+
+from app.core.print_file import print_file_win32
+from app.utils.create_qr_code import generate_medical_qr_code
+from app.utils.get_file_path import get_file_path
+
+VIET_FONT = 'TimesNewRomanVN'
+VIET_FONT_BOLD = 'TimesNewRomanVNBold'
+VIET_FONT_ITALIC = 'TimesNewRomanVNItalic'
 
 try:
-    FONT_PATH = 'C:/Windows/Fonts/Arial.ttf'  # Thay bằng đường dẫn thực tế, ví dụ: 'C:/Windows/Fonts/Tahoma.ttf'
-    # Đăng ký font
-    pdfmetrics.registerFont(TTFont(VIET_FONT, FONT_PATH))
-    pdfmetrics.registerFont(TTFont(VIET_FONT_BOLD, FONT_PATH))
-    pdfmetrics.registerFont(TTFont(VIET_FONT_ITALIC, FONT_PATH))
-
-except Exception as e:
-    print(f"!!! CẢNH BÁO: Lỗi đăng ký font: {e}")
-    print("Sử dụng font ReportLab mặc định (có thể không hiển thị tiếng Việt).")
+    pdfmetrics.registerFont(TTFont(VIET_FONT, 'C:/Windows/Fonts/times.ttf'))
+    pdfmetrics.registerFont(TTFont(VIET_FONT_BOLD, 'C:/Windows/Fonts/timesbd.ttf'))
+    pdfmetrics.registerFont(TTFont(VIET_FONT_ITALIC, 'C:/Windows/Fonts/timesi.ttf'))
+except Exception:
     VIET_FONT = 'Times-Roman'
     VIET_FONT_BOLD = 'Times-Bold'
     VIET_FONT_ITALIC = 'Times-Italic'
 
-# ----------------- DỮ LIỆU MẪU CỦA PHIẾU TIẾP NHẬN -----------------
-data = {
-    'clinic_name': 'BỆNH VIỆN ABC',
-    'room_info': 'Lầu X Phòng K',
-    'queue_number': '0000',
-    'code': 'CODE',
-    'patient_name': 'Nguyễn Văn A',
-    'patient_dob': '1999',
-    'schedule_time': '23/10/2025 13:34',
-    'print_time': '23/10/2025 13:34:37',
-    'payment_method': 'BHYT'
-}
 
-# Kích thước tiêu chuẩn cho phiếu in nhiệt (khoảng 80mm)
-TICKET_WIDTH = 80 * mm
-TICKET_HEIGHT = 65 * mm
+def _safe_text(value):
+    return '' if value is None else str(value).strip()
 
-def draw_ticket(canvas, data):
-    """Vẽ nội dung phiếu chờ khám lên canvas của ReportLab."""
 
-    # 1. Khởi tạo Styles và Canvas
-    styles = getSampleStyleSheet()
-
-    # Thêm style cho tiêu đề và nội dung (Lưu ý: Bạn có thể thêm 'leading' để điều chỉnh khoảng cách dòng trong Paragraph)
-    styles.add(ParagraphStyle(name='Header', fontName=VIET_FONT_BOLD, fontSize=11, alignment=1, leading=14))
-    styles.add(ParagraphStyle(name='RoomInfo', fontName=VIET_FONT_BOLD, fontSize=16, alignment=0, leading=20))
-    styles.add(ParagraphStyle(name='QueueNumber', fontName=VIET_FONT_BOLD, fontSize=30, textColor=HexColor('#d9534f')))
-    styles.add(ParagraphStyle(name='NormalLeft', fontName=VIET_FONT, fontSize=10, alignment=0, leading=12))
-    styles.add(ParagraphStyle(name='SmallItalic', fontName=VIET_FONT_ITALIC, fontSize=9, alignment=1, leading=10))
-
-    # 2. Định vị bắt đầu vẽ (Bắt đầu từ trên xuống)
-    y_cursor = TICKET_HEIGHT - 5 * mm  # Bắt đầu cách lề trên 5mm
-
-    # KHOẢNG CÁCH MỚI
-    SPACE_SMALL = 4 * mm
-    SPACE_MEDIUM = 6 * mm
-    SPACE_LARGE = 12 * mm
-
-    # 3. Vẽ BỆNH VIỆN ABC
-    p = Paragraph(data['clinic_name'], styles['Header'])
-    p.wrapOn(canvas, TICKET_WIDTH - 10 * mm, 15 * mm)
-    p.drawOn(canvas, 5 * mm, y_cursor - SPACE_SMALL)
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 15mm
-
-    # 4. Vẽ Lầu X Phòng K
-    p = Paragraph(data['room_info'], styles['RoomInfo'])
-    p.wrapOn(canvas, TICKET_WIDTH - 10 * mm, 15 * mm)
-    p.drawOn(canvas, 5 * mm, y_cursor - SPACE_MEDIUM)
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 15mm
-
-    # 5. Vẽ SỐ THỨ TỰ (0000 và CODE)
-    # Vị trí cho 0000
-    canvas.setFont(VIET_FONT_BOLD, 30)
-    # canvas.setFillColor(HexColor('#d9534f'))
-    canvas.drawString(5 * mm, y_cursor - 10 * mm, data['queue_number'])  # Giữ nguyên vị trí vẽ số lớn
-
-    # Vị trí cho CODE
-    canvas.setFont(VIET_FONT, 10)
-    canvas.setFillColor('black')
-    canvas.drawString(TICKET_WIDTH - 25 * mm, y_cursor - 5 * mm, '')
-    y_cursor -= SPACE_LARGE  # Giảm từ 15mm
-
-    # Kẻ một đường ngang
-    canvas.line(5 * mm, y_cursor, TICKET_WIDTH - 5 * mm, y_cursor)
-    y_cursor -= SPACE_SMALL  # Giảm từ 5mm
-
-    # 6. Vẽ Tên Bệnh Nhân
-    patient_text = f"{data['patient_name']} - {data['patient_dob']}"
-    canvas.setFont(VIET_FONT_BOLD, 12)
-    canvas.drawString(5 * mm, y_cursor - SPACE_SMALL, patient_text)
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 10mm
-
-    # 7. Vẽ Thời gian Dự kiến
-    time_text = f"Dự kiến: {data['schedule_time']} --> {data['schedule_time']}"
-    canvas.setFont(VIET_FONT, 8)
-    canvas.drawString(5 * mm, y_cursor - SPACE_SMALL, time_text)
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 10mm
-
-    # 8. Vui lòng chờ
-    canvas.setFont(VIET_FONT, 10)
-    canvas.drawCentredString(TICKET_WIDTH / 2, y_cursor - SPACE_SMALL, "Vui lòng chờ đến số thứ tự")
-    y_cursor -= SPACE_SMALL  # Giảm từ 15mm
-
-    # 9. Phiếu chỉ có giá trị trong ngày
-    canvas.setFont(VIET_FONT_ITALIC, 9)
-    canvas.drawCentredString(TICKET_WIDTH / 2, y_cursor - SPACE_SMALL, "Phiếu chỉ có giá trị trong ngày!")
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 10mm
-
-    # 10. Phương thức thanh toán và giờ in
-    canvas.setFont(VIET_FONT, 9)
-    canvas.drawString(5 * mm, y_cursor - SPACE_SMALL, data['payment_method'])
-    canvas.drawRightString(TICKET_WIDTH - 5 * mm, y_cursor - SPACE_SMALL, data['print_time'])
-    y_cursor -= SPACE_MEDIUM  # Giảm từ 10mm
+def _build_pdf_path(data):
+    output_dir = get_file_path('data/tiep_nhan_benh_nhan')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ma_y_te = _safe_text(data.get('MaYTe'))
+    stt = _safe_text(data.get('STT'))
+    safe_time = datetime.now().strftime('%H%M%S')
+    parts = ['phieu_tiep_nhan']
+    if ma_y_te:
+        parts.append(ma_y_te)
+    if stt:
+        parts.append(stt)
+    parts.append(safe_time)
+    return output_dir / ('_'.join(parts) + '.pdf')
 
 
 def create_and_open_pdf_for_printing(data):
-    """Tạo file PDF tạm thời bằng ReportLab và mở file."""
+    """Tạo phiếu tiếp nhận A7 có QR và in ra máy in mặc định."""
     try:
-        # 1. Tạo tệp PDF tạm thời
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
-            pdf_path = tmp_file.name
+        pdf_path = _build_pdf_path(data)
 
-        # 2. Khởi tạo canvas với kích thước A4 (hoặc kích thước tùy chỉnh)
-        c = canvas.Canvas(pdf_path, pagesize=A4)
-        c.translate(0, A4[1] - TICKET_HEIGHT)
+        width, height = landscape(A7)
+        c = canvas.Canvas(str(pdf_path), pagesize=landscape(A7))
+        c.setTitle('Phiếu tiếp nhận')
 
-        # 3. Vẽ border để mô phỏng phiếu chờ
-        c.rect(0, 0, TICKET_WIDTH, TICKET_HEIGHT, stroke=0, fill=0)
+        margin_left = 4 * mm
+        margin_right = 4 * mm
+        qr_size = 16 * mm
+        
+        # Đặt mã QR ở góc phải bên trên sát lề
+        qr_x = width - margin_right - qr_size
+        qr_y = height - 4 * mm - qr_size
+        
+        # Căn giữa tiêu đề bệnh viện ở vùng trống bên trái mã QR
+        header_center_x = (qr_x + margin_left) / 2
 
-        # 4. Gọi hàm vẽ nội dung phiếu
-        draw_ticket(c, data)
+        c.setFont(VIET_FONT_BOLD, 10)
+        c.drawCentredString(header_center_x, height - 6 * mm, _safe_text(data.get('TenBenhVien', 'BỆNH VIỆN')))
+        c.drawCentredString(header_center_x, height - 11 * mm, _safe_text(data.get('PhongTiepNhan', data.get('Phong', 'PHÒNG KHÁM'))))
 
-        # Kết thúc và lưu file PDF
+        # Sinh mã QR
+        qr_path = generate_medical_qr_code(
+            ma_y_te=data.get('MaYTe', ''),
+            so_bhyt=data.get('SoBHYT', ''),
+            doi_tuong=data.get('DoiTuong', ''),
+            ho_ten=data.get('HoTen', ''),
+            tuoi=str(data.get('Tuoi', '')),
+            gioi_tinh=data.get('GioiTinh', ''),
+            dia_chi=data.get('DiaChi', ''),
+            so_dien_thoai=data.get('SoDienThoai', ''),
+            so_tien='0',
+            bill_type='TIEP_NHAN',
+            items=[]
+        )
+
+        # Vẽ Số thứ tự (STT) ở phía bên trái vùng trên
+        stt_text = _safe_text(data.get('STT'))
+        if stt_text:
+            c.setFont(VIET_FONT_BOLD, 18)
+            c.drawString(margin_left, height - 19 * mm, f"{stt_text}")
+
+        # Vẽ hình ảnh QR Code
+        if qr_path and os.path.exists(qr_path):
+            c.drawImage(ImageReader(qr_path), qr_x, qr_y, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
+        
+        # Tạo Paragraph bọc chữ căn giữa và tự động xuống hàng cho Mã y tế & Đối tượng dưới mã QR
+        code_text = _safe_text(data.get('MaYTe'))
+        doi_tuong_text = _safe_text(data.get('DoiTuong'))
+        qr_labels = []
+        if code_text:
+            qr_labels.append(code_text)
+        if doi_tuong_text:
+            qr_labels.append(f"({doi_tuong_text})")
+            
+        if qr_labels:
+            qr_text_style = ParagraphStyle(
+                name='QRTextStyle',
+                fontName=VIET_FONT_BOLD,
+                fontSize=8,
+                leading=10,
+                alignment=1,  # Căn giữa hoàn toàn (Center alignment)
+            )
+            qr_text_p = Paragraph("<br/>".join(qr_labels), qr_text_style)
+            qr_box_width = qr_size + 8 * mm  # Tăng chiều rộng hộp text một chút để căn giữa cân xứng dưới QR
+            ql_w, ql_h = qr_text_p.wrap(qr_box_width, 20 * mm)
+            qr_text_p.drawOn(c, qr_x + (qr_size / 2) - (qr_box_width / 2), qr_y - ql_h - 1 * mm)
+
+        # --- Khu vực thông tin bệnh nhân ---
+        # Dòng 1: Họ tên - Năm sinh - Giới tính
+        name_y = height - 35.5 * mm
+        c.setFont(VIET_FONT_BOLD, 10)
+        c.drawString(margin_left, name_y, _safe_text(data.get('HoTen')))
+        c.drawString(margin_left + 185, name_y, _safe_text(data.get('NamSinh')))
+        c.drawString(margin_left + 250, name_y, _safe_text(data.get('GioiTinh')))
+
+        # Dòng 2: Mã số thẻ BHYT
+        bhyt_y = name_y - 5.5 * mm
+        c.setFont(VIET_FONT, 10)
+        label = 'Mã số thẻ BHYT: '
+        bhyt_value = _safe_text(data.get('SoBHYT'))
+        c.drawString(margin_left, bhyt_y, label)
+        c.setFont(VIET_FONT_BOLD, 10)
+        c.drawString(margin_left + stringWidth(label, VIET_FONT, 10), bhyt_y, bhyt_value)
+
+        # Dòng 3: Địa chỉ (Xử lý co giãn tự động và text wrap)
+        address_y = bhyt_y - 5.5 * mm
+        address_value = _safe_text(data.get('DiaChi'))
+
+        address_style = ParagraphStyle(
+            name='AddressStyle',
+            fontName=VIET_FONT,
+            fontSize= 10,
+        )
+        address_paragraph = Paragraph(f"Địa chỉ: <b>{address_value}</b>", address_style)
+        address_width = width - margin_left - margin_right
+        address_w, address_h = address_paragraph.wrap(address_width, 30 * mm)
+        address_paragraph.drawOn(c, margin_left, address_y - address_h + 2)
+
+        # Dòng 4: Thời hạn bảo hiểm y tế
+        bh_from_label = 'BH Từ ngày: '
+        bh_to_label = 'BH Đến ngày: '
+        bh_from_value = _safe_text(data.get('BHYT_Tu') or data.get('BHYTFrom') or data.get('BHYT_TuNgay'))
+        bh_to_value = _safe_text(data.get('BHYT_Den') or data.get('BHYTTo') or data.get('BHYT_DenNgay'))
+        
+        # Tọa độ Y động tính dựa trên điểm kết thúc của khối Địa chỉ
+        date_y = address_y - address_h - 2.5 * mm
+        
+        # In đậm toàn bộ thông tin BH Từ ngày
+        c.setFont(VIET_FONT_BOLD, 10)
+        c.drawString(margin_left, date_y, bh_from_label)
+        c.drawString(margin_left + stringWidth(bh_from_label, VIET_FONT_BOLD, 10), date_y, bh_from_value)
+        
+        # In đậm toàn bộ thông tin BH Đến ngày
+        right_x = width / 2 + 2 * mm
+        c.drawString(right_x, date_y, bh_to_label)
+        c.drawString(right_x + stringWidth(bh_to_label, VIET_FONT_BOLD, 10), date_y, bh_to_value)
+
         c.showPage()
         c.save()
 
-        print(f"Đã tạo file PDF tạm tại: {pdf_path}")
-
-        # 5. Mở file PDF để in
-        if sys.platform == "win32":
-            os.startfile(pdf_path)
-        elif sys.platform == "darwin":
-            os.system(f'open "{pdf_path}"')
-        else:
-            os.system(f'xdg-open "{pdf_path}"')
-
+        # Tiến trình đẩy lệnh in / preview tự động
+        printed = print_file_win32(str(pdf_path))
+        if not printed:
+            if sys.platform == 'win32':
+                try:
+                    os.startfile(str(pdf_path))
+                except Exception:
+                    pass
+            elif sys.platform == 'darwin':
+                os.system(f'open "{pdf_path}"')
+            else:
+                os.system(f'xdg-open "{pdf_path}"')
+        return str(pdf_path)
     except Exception as e:
-        print(f"Đã xảy ra lỗi khi tạo PDF với ReportLab: {e}")
+        print(f'Lỗi tạo phiếu tiếp nhận: {e}')
+        return None

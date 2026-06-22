@@ -143,14 +143,7 @@ class TabTiepNhanBenhNhan(QWidget):
         """)
         # ----------------------------------------------------
 
-        # 1. Tiêu đề
-        tieu_de = QLabel("<h1>Tiếp nhận bệnh nhân</h1>")
-        tieu_de.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Sử dụng phương thức .addWidget(widget, row, column, rowSpan, colSpan)
-        # Đặt tiêu đề ở hàng 0, cột 0, kéo dài qua 2 cột (colSpan=2)
-        self.content_layout.addWidget(tieu_de, 0, 0, 1, 2)
-
-        # 2. Danh sách các trường nhập liệu
+        # Danh sách các trường nhập liệu
         # Sử dụng QGridLayout với 2 cột: Cột 0 (Nhãn) và Cột 1 (Trường nhập liệu)
         # Danh sách các trường và loại widget phù hợp
         # Quyết định thứ tự cac trường nhập liệu từ trên xuống dưới

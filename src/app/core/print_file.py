@@ -6,7 +6,7 @@ import os
 def print_file_win32(file_path):
     if not os.path.exists(file_path):
         print(f"Lỗi: Không tìm thấy tệp tại đường dẫn: {file_path}")
-        return
+        return False
 
     try:
         default_printer = win32print.GetDefaultPrinter()
@@ -21,12 +21,11 @@ def print_file_win32(file_path):
             0  # 0: SW_HIDE - Cố gắng ẩn cửa sổ ứng dụng in
         )
 
-        # print(f"Đã gửi lệnh in thành công:")
-        # print(f" - Tệp: {os.path.basename(abs_path)}")
-        # print(f" - Máy in: {default_printer}")
+        return True
 
     except Exception as e:
         print(f"Lỗi khi in bằng win32api: {e}")
+        return False
 
 
 if __name__ == "__main__":

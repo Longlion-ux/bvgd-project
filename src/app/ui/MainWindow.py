@@ -34,6 +34,9 @@ class Ui_mainWidget(object):
         self.tab_tai_vu = QtWidgets.QWidget()
         self.tab_tai_vu.setObjectName("tab_tai_vu")
         self.tabWidget.addTab(self.tab_tai_vu, "")
+        self.tab_tiep_nhan = QtWidgets.QWidget()
+        self.tab_tiep_nhan.setObjectName("tab_tiep_nhan")
+        self.tabWidget.addTab(self.tab_tiep_nhan, "")
         self.verticalLayout.addWidget(self.tabWidget)
 
         self.retranslateUi(mainWidget)
@@ -46,3 +49,4 @@ class Ui_mainWidget(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_kham_benh), _translate("mainWidget", "Khám bệnh"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_dkdv), _translate("mainWidget", "Đăng ký dịch vụ"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_tai_vu), _translate("mainWidget", "Tài vụ"))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_tiep_nhan), _translate("mainWidget", "Tiếp nhận"))
