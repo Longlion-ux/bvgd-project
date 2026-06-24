@@ -1,4 +1,5 @@
 from PyQt6 import QtWidgets, QtCore
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.uic.Compiler.qtproxies import QtGui
 
@@ -23,6 +24,8 @@ class AppController(QtWidgets.QWidget):
 
         self.ui_main = Ui_mainWidget()
         self.ui_main.setupUi(self)
+
+        self.ui_main.tabWidget.currentChanged.connect(self.handle_tab_changed)
 
         self.kham_benh_controller = KhamBenhTabController(
             tab_widget_container=self.ui_main.tab_kham_benh
@@ -259,3 +262,32 @@ class AppController(QtWidgets.QWidget):
             self.ui_main.tabWidget.setCurrentIndex(kham_benh_tab_index)
 
         self.kham_benh_controller.reset_all()
+
+    def handle_tab_changed(self, index):
+        """Điều phối đóng/mở cổng COM6 linh hoạt không phụ thuộc vào thứ tự Index cứng"""
+        
+        # 1. Lấy đúng thực thể giao diện của Tab mà người dùng vừa click vào
+        current_tab_widget = self.ui_main.tabWidget.widget(index)
+
+        # 2. Kiểm tra Tab hiện tại và thực hiện đóng/mở cổng COM6 tương ứng
+        if current_tab_widget == self.ui_main.tab_kham_benh:
+            # Tắt Tab Tiếp nhận
+            if hasattr(self, 'tiep_nhan_controller'):
+                self.tiep_nhan_controller.close_serial_port()
+            if hasattr(self, 'kham_benh_controller'):
+                QTimer.singleShot(150, lambda: self.kham_benh_controller.open_serial_port())
+
+        elif current_tab_widget == self.ui_main.tab_tiep_nhan:
+            # Tắt Tab Khám bệnh
+            if hasattr(self, 'kham_benh_controller'):
+                self.kham_benh_controller.close_serial_port()
+            
+            if hasattr(self, 'tiep_nhan_controller'):
+                QTimer.singleShot(150, lambda: self.tiep_nhan_controller.open_serial_port())
+
+        else:
+            # Nếu người dùng bấm vào các Tab khác. Ra lệnh ngắt COM6 để giải phóng tài nguyên
+            if hasattr(self, 'kham_benh_controller'):
+                self.kham_benh_controller.close_serial_port()
+            if hasattr(self, 'tiep_nhan_controller'):
+                self.tiep_nhan_controller.close_serial_port()

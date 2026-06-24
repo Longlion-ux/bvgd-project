@@ -23,6 +23,8 @@ src/data/
 
 # --- Các thư mục không cần ---
 src/tools/
+src/mock_scanner.py
+src/find_vid.py
 
 # --- Các file cấu hình của IDE (PyCharm, VS Code) ---
 .idea/

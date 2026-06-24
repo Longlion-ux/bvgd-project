@@ -2,6 +2,7 @@ import re
 import math
 
 from PyQt6 import QtCore, QtWidgets
+from PyQt6.QtSerialPort import QSerialPort
 from PyQt6.QtGui import QKeySequence, QRegularExpressionValidator, QShortcut
 from PyQt6.QtCore import QRegularExpression, QDate, QDateTime, QEvent, QTimer
 from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem
@@ -21,7 +22,6 @@ from app.utils.utils import calculate_age
 
 from app.utils.config_manager import ConfigManager
 
-
 class ComboBoxFilter(QtCore.QObject):
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.FocusIn:
@@ -32,6 +32,65 @@ class ComboBoxFilter(QtCore.QObject):
                     QTimer.singleShot(0, source.selectAll)
 
         return super().eventFilter(source, event)
+    
+class CCCDScannerFilter(QtCore.QObject):
+    scanCompleted = QtCore.pyqtSignal(str)
+
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+        self.buffer = ""
+        self.last_key_time = 0
+        self.is_scanning = False
+
+    def eventFilter(self, obj, event):
+        # Chỉ xử lý khi Tab Tiếp Nhận đang hiển thị
+        if not self.parent_widget.isVisible():
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.KeyPress:
+            current_time = QtCore.QDateTime.currentMSecsSinceEpoch()
+            interval = current_time - self.last_key_time
+            self.last_key_time = current_time
+
+            char = event.text()
+            key = event.key()
+
+            # Nếu khoảng cách giữa các phím cực nhỏ (< 50ms) -> Chắc chắn là máy quét
+            if interval < 50:
+                if not self.is_scanning:
+                    self.is_scanning = True
+                    # KHẮC PHỤC RÒ RỈ PHÍM ĐẦU TIÊN:
+                    # Xóa ký tự đầu tiên lỡ bị gõ vào widget đang focus trước khi bộ lọc kịp chặn dội phím
+                    active_widget = QtWidgets.QApplication.focusWidget()
+                    if isinstance(active_widget, QtWidgets.QLineEdit):
+                        text = active_widget.text()
+                        if text:
+                            active_widget.setText(text[:-1])
+            else:
+                # Người gõ bình thường (> 50ms) thì reset bộ đệm, trừ phím Enter kết thúc quét
+                if key not in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                    self.is_scanning = False
+                    self.buffer = ""
+
+            # CHỐNG UNIKEY & TRÁNH GHI ĐÈ VÀO Ô ĐANG FOCUS:
+            # Nếu đang trong luồng quét, nuốt sạch toàn bộ phím không cho ghi lên UI đang focus
+            if self.is_scanning:
+                if key in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                    # Kết thúc quá trình quét khi nhận phím Enter từ máy quét
+                    if "|" in self.buffer and len(self.buffer.split("|")) >= 6:
+                        self.scanCompleted.emit(self.buffer)
+                        self.buffer = ""
+                        self.is_scanning = False
+                        return True
+                    self.buffer = ""
+                    self.is_scanning = False
+                else:
+                    if char:
+                        self.buffer += char
+                return True
+
+        return super().eventFilter(obj, event)
 
 class TiepNhanTabController(QtWidgets.QWidget):
     @staticmethod
@@ -73,6 +132,9 @@ class TiepNhanTabController(QtWidgets.QWidget):
 
         # 3. Khôi phụ cài đặt
         self._load_saved_settings()
+
+        # 4. Cài đặt bộ quét cổng COM
+        self.is_processing_scan = False
 
     def init(self):
         self.cb_event_filter = ComboBoxFilter()
@@ -227,7 +289,14 @@ class TiepNhanTabController(QtWidgets.QWidget):
     def update_tuoi(self):
         ui = self.ui_tiep_nhan
         nam_sinh = ui.nam_sinh.date()
-        tuoi = str(calculate_age(nam_sinh.toString('dd/MM/yyyy')))
+        current_year = QDate.currentDate().year()
+        birth_year = nam_sinh.year()
+
+        tuoi_calc = current_year - birth_year
+        if tuoi_calc < 0:
+            tuoi_calc = 0
+            
+        tuoi = str(tuoi_calc)
         ui.tuoi.setText(tuoi)
         ui.tuoi.setStyleSheet(TUOI_STYLE)
 
@@ -291,6 +360,7 @@ class TiepNhanTabController(QtWidgets.QWidget):
             'Tuoi': self.ui_tiep_nhan.tuoi.text().strip(),
             'GioiTinh': self.ui_tiep_nhan.gioi_tinh.currentText(),
             'DiaChi': self.ui_tiep_nhan.dia_chi.text().strip(),
+            'CCCD': self._clean_numeric_string(self.ui_tiep_nhan.cccd.text()),
             'SoDienThoai': self._clean_numeric_string(self.ui_tiep_nhan.sdt.text(), expected_length=10),
             'DoiTuong': self.ui_tiep_nhan.doi_tuong.currentText().strip(),
             'SoBHYT': self._clean_numeric_string(self.ui_tiep_nhan.so_bhyt.text()),
@@ -514,3 +584,190 @@ class TiepNhanTabController(QtWidgets.QWidget):
 
     def handle_export_excel(self):
         export_tiep_nhan_and_show_dialog(self)
+    
+    def parse_cccd_qr_data(self, qr_text):
+        """Phân tích dữ liệu CCCD từ cổng COM và nạp lên biểu mẫu"""
+        if self.is_processing_scan:
+            return
+        self.is_processing_scan = True
+
+        try:
+            # Loại bỏ khoảng trắng thừa ở đầu/cuối chuỗi QR nhận từ cổng COM
+            qr_text = qr_text.strip()
+            parts = [p.strip() for p in qr_text.split('|')]
+            
+            if len(parts) < 5:
+                return
+
+            ngay_sinh_raw = ""
+            date_index = -1
+            for i, part in enumerate(parts):
+                if len(part) == 8 and part.isdigit():
+                    ngay_sinh_raw = part
+                    date_index = i
+                    break
+            
+            if not ngay_sinh_raw and len(parts) > 4:
+                ngay_sinh_raw = parts[4]
+
+            cccd_code = parts[0]
+            
+            if date_index != -1:
+                # Nếu tìm thấy ngày sinh bằng thuật toán quét chuỗi số
+                ho_ten = parts[date_index - 1]
+                gioi_tinh = parts[date_index + 1] if date_index + 1 < len(parts) else ""
+                dia_chi = parts[date_index + 2] if date_index + 2 < len(parts) else ""
+            else:
+                # Nếu không tìm thấy, dùng index cố định an toàn
+                ho_ten = parts[2]
+                gioi_tinh = parts[3]
+                dia_chi = parts[5] if len(parts) > 5 else ""
+
+            # Đổ dữ liệu lên UI
+            self.ui_tiep_nhan.cccd.setText(cccd_code)
+            self.ui_tiep_nhan.ho_ten.setText(ho_ten)
+            self.ui_tiep_nhan.dia_chi.setText(dia_chi)
+
+            # Chuẩn hóa giới tính
+            if hasattr(self, '_normalize_gioi_tinh'):
+                gioi_tinh_chuan = self._normalize_gioi_tinh(gioi_tinh)
+            else:
+                text_gt = str(gioi_tinh or '').strip().lower()
+                mapping_gt = {'nam': 'Nam', 'nu': 'Nữ', 'nữ': 'Nữ', 'g': 'Nữ', 'm': 'Nam'}
+                gioi_tinh_chuan = mapping_gt.get(text_gt, 'Nam')
+            
+            self.ui_tiep_nhan.gioi_tinh.setCurrentText(gioi_tinh_chuan)
+
+            # Phân tích ngày sinh
+            date_parsed = self._parse_cccd_date(ngay_sinh_raw)
+            
+            # Chỉ set ngày sinh nếu đã phân tích được ngày hợp lệ
+            if date_parsed.isValid():
+                self.ui_tiep_nhan.nam_sinh.setDate(date_parsed)
+                if hasattr(self, 'update_tuoi'):
+                    self.update_tuoi()
+            else:
+                self.ui_tiep_nhan.nam_sinh.setDate(QDate.currentDate())
+
+        except Exception as e:
+            QMessageBox.warning(
+                self, 
+                "Lỗi xử lý dữ liệu", 
+                f"Đã xảy ra lỗi khi phân tách chuỗi CCCD: {str(e)}"
+            )
+        finally:
+            QTimer.singleShot(1500, lambda: setattr(self, 'is_processing_scan', False))
+
+    def _parse_cccd_date(self, date_str):
+        """Hàm parse date từ mã QR CCCD"""
+        date_str = str(date_str).strip()
+        if len(date_str) == 8 and date_str.isdigit():
+            day = int(date_str[0:2])
+            month = int(date_str[2:4])
+            year = int(date_str[4:8])
+            # Kiểm tra tính hợp lệ của ngày trước khi trả về
+            res_date = QDate(year, month, day)
+            if res_date.isValid():
+                return res_date
+        
+        for fmt in ('dd/MM/yyyy', 'dd-MM-yyyy'):
+            parsed = QDate.fromString(date_str, fmt)
+            if parsed.isValid():
+                return parsed
+        return QDate()
+    
+    def get_scanner_port_name(self):
+        """Tự động bắt cổng COM nghi ngờ là máy quét nhất mà không cần ID cứng"""
+        from PyQt6.QtSerialPort import QSerialPortInfo
+        
+        available_ports = QSerialPortInfo.availablePorts()
+        if not available_ports:
+            return None
+
+        # Danh sách từ khóa thường xuất hiện trong tên/mô tả của máy quét mã vạch
+        target_keywords = ['newland', 'barcode', 'scanner', 'symbol', 'honeywell', 'datalogic']
+        
+        # Ưu tiên tuyệt đối những cổng có tên hãng máy quét
+        for port in available_ports:
+            desc = port.description().lower()
+            manu = port.manufacturer().lower()
+            if any(keyword in desc for keyword in target_keywords) or any(keyword in manu for keyword in target_keywords):
+                return port.portName()
+
+        # Nếu không tìm thấy, thử kiểm tra các cổng có mô tả phổ biến của chip USB-to-Serial (CH340, PL2303)
+        for port in available_ports:
+            desc = port.description().lower()
+            if 'usb serial device' in desc or 'ch340' in desc or 'pl2303' in desc:
+                return port.portName()
+
+        # Nếu không tìm thấy cổng nào phù hợp, trả về cổng cuối cùng trong danh sách
+        return available_ports[-1].portName()
+
+    def setup_serial_scanner(self):
+        """Khởi tạo và cấu hình cổng COM đọc dữ liệu từ máy quét"""
+        # Nếu chưa có đối tượng serial thì mới tạo mới hoàn toàn
+        if not hasattr(self, 'serial') or self.serial is None:
+            self.serial = QSerialPort(self)
+            self.serial.readyRead.connect(self.read_serial_data)
+
+        # Nếu cổng đang mở, đóng lại trước khi tái cấu hình để tránh xung đột bận cổng
+        if self.serial.isOpen():
+            self.serial.close()
+
+        # Tự động tìm cổng COM của máy quét Newland
+        target_port = self.get_scanner_port_name()
+        
+        if not target_port:
+            print("Không tìm thấy máy quét nào được cắm vào máy tính.")
+            return
+
+        self.serial.setPortName(target_port) # Gán tự động COM4, COM6...
+        self.serial.setBaudRate(9600)
+        
+        if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
+            print(f"Đã kết nối máy quét thành công tại cổng {target_port} thành công tại Tab Tiếp nhận.")
+        else:
+            print(f"Cảnh báo cổng {target_port}  tại Tab Tiếp nhận: {self.serial.errorString()}. Vui lòng kiểm tra cắm dây máy quét.")
+
+    def open_serial_port(self):
+        """Mở lại cổng COM tại Tab Tiếp nhận"""
+
+        # Tự động tìm cổng COM của máy quét Newland
+        target_port = self.get_scanner_port_name()
+
+        if hasattr(self, 'serial') and self.serial is not None:
+            if not self.serial.isOpen():
+                # ĐÃ SỬA THỤT LỀ LOGIC TẠI ĐÂY
+                if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
+                    print(f"Đã mở lại cổng kết nối {target_port} tại Tab Tiếp nhận.")
+                else:
+                    print(f"Tab Tiếp nhận: Lỗi mở lại cổng ({self.serial.errorString()})")
+        else:
+            self.setup_serial_scanner()
+
+    def close_serial_port(self):
+        """Đóng cổng COM khi ẩn Tab Tiếp nhận"""
+        if hasattr(self, 'serial') and self.serial is not None:
+            if self.serial.isOpen():
+                self.serial.close()
+                print("Đã đóng cổng kết nối tại Tab Tiếp nhận.")
+
+    def read_serial_data(self):
+        """Đọc và tích lũy dữ liệu thô từ cổng COM, giải mã UTF-8 chuẩn xác"""
+        if not hasattr(self, 'serial_buffer'):
+            self.serial_buffer = b""
+
+        # Đọc toàn bộ dữ liệu hiện có trong buffer của cổng COM
+        self.serial_buffer += self.serial.readAll().data()
+
+        try:
+            text = self.serial_buffer.decode('utf-8', errors='ignore')
+        except UnicodeDecodeError:
+            return
+
+        # Kết thúc dòng truyền (máy quét gửi \r hoặc \n)
+        if '\r' in text or '\n' in text:
+            clean_text = text.strip()
+            if "|" in clean_text and len(clean_text.split("|")) >= 6:
+                self.parse_cccd_qr_data(clean_text)
+            self.serial_buffer = b"" # Reset bộ đệm cho lần quét kế tiếp
