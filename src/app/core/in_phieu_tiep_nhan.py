@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 import sys
 
-from reportlab.lib.pagesizes import A7, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -50,30 +50,30 @@ def _build_pdf_path(data):
 
 
 def create_and_open_pdf_for_printing(data):
-    """Tạo phiếu tiếp nhận A7 có QR và in ra máy in mặc định."""
+    """Tạo phiếu tiếp nhận trên giấy A4 portrait, đặt nội dung nhỏ ở góc trái trên để in phù hợp với máy in."""
     try:
         pdf_path = _build_pdf_path(data)
 
-        width, height = landscape(A7)
-        c = canvas.Canvas(str(pdf_path), pagesize=landscape(A7))
+        width, height = A4
+        c = canvas.Canvas(str(pdf_path), pagesize=A4)
         c.setTitle('Phiếu tiếp nhận')
 
-        margin_left = 4 * mm
-        margin_right = 4 * mm
-        qr_size = 16 * mm
-        
-        # Đặt mã QR ở góc phải bên trên sát lề
-        qr_x = width - margin_right - qr_size
-        qr_y = height - 4 * mm - qr_size
-        
-        # Căn giữa tiêu đề bệnh viện ở vùng trống bên trái mã QR
-        header_center_x = (qr_x + margin_left) / 2
+        # Khu vực nội dung nhỏ ở góc trái trên giấy A4
+        margin_left = 8 * mm
+        margin_top = 8 * mm
+        content_width = 95 * mm
+        content_height = 118 * mm
+        content_x = margin_left
+        content_y = height - margin_top - content_height
+
+        qr_size = 24 * mm
+        qr_x = content_x + content_width - qr_size - 3 * mm
+        qr_y = content_y + content_height - qr_size - 6 * mm
 
         c.setFont(VIET_FONT_BOLD, 10)
-        c.drawCentredString(header_center_x, height - 6 * mm, _safe_text(data.get('TenBenhVien', 'BỆNH VIỆN')))
-        c.drawCentredString(header_center_x, height - 11 * mm, _safe_text(data.get('PhongTiepNhan', data.get('Phong', 'PHÒNG KHÁM'))))
+        c.drawString(content_x + 2 * mm, content_y + content_height - 8 * mm, _safe_text(data.get('TenBenhVien', 'BỆNH VIỆN')))
+        c.drawString(content_x + 2 * mm, content_y + content_height - 13 * mm, _safe_text(data.get('PhongTiepNhan', data.get('Phong', 'PHÒNG KHÁM'))))
 
-        # Sinh mã QR
         qr_path = generate_medical_qr_code(
             ma_y_te=data.get('MaYTe', ''),
             so_bhyt=data.get('SoBHYT', ''),
@@ -88,17 +88,14 @@ def create_and_open_pdf_for_printing(data):
             items=[]
         )
 
-        # Vẽ Số thứ tự (STT) ở phía bên trái vùng trên
         stt_text = _safe_text(data.get('STT'))
         if stt_text:
-            c.setFont(VIET_FONT_BOLD, 18)
-            c.drawString(margin_left, height - 19 * mm, f"{stt_text}")
+            c.setFont(VIET_FONT_BOLD, 16)
+            c.drawString(content_x + 2 * mm, content_y + content_height - 22 * mm, f"{stt_text}")
 
-        # Vẽ hình ảnh QR Code
         if qr_path and os.path.exists(qr_path):
             c.drawImage(ImageReader(qr_path), qr_x, qr_y, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
-        
-        # Tạo Paragraph bọc chữ căn giữa và tự động xuống hàng cho Mã y tế & Đối tượng dưới mã QR
+
         code_text = _safe_text(data.get('MaYTe'))
         doi_tuong_text = _safe_text(data.get('DoiTuong'))
         qr_labels = []
@@ -106,69 +103,57 @@ def create_and_open_pdf_for_printing(data):
             qr_labels.append(code_text)
         if doi_tuong_text:
             qr_labels.append(f"({doi_tuong_text})")
-            
+
         if qr_labels:
             qr_text_style = ParagraphStyle(
                 name='QRTextStyle',
                 fontName=VIET_FONT_BOLD,
-                fontSize=8,
-                leading=10,
-                alignment=1,  # Căn giữa hoàn toàn (Center alignment)
+                fontSize=7.5,
+                leading=9,
+                alignment=1,
             )
             qr_text_p = Paragraph("<br/>".join(qr_labels), qr_text_style)
-            qr_box_width = qr_size + 8 * mm  # Tăng chiều rộng hộp text một chút để căn giữa cân xứng dưới QR
-            ql_w, ql_h = qr_text_p.wrap(qr_box_width, 20 * mm)
-            qr_text_p.drawOn(c, qr_x + (qr_size / 2) - (qr_box_width / 2), qr_y - ql_h - 1 * mm)
+            qr_box_width = qr_size + 4 * mm
+            _, ql_h = qr_text_p.wrap(qr_box_width, 18 * mm)
+            qr_text_p.drawOn(c, qr_x + (qr_size / 2) - (qr_box_width / 2), qr_y - ql_h - 1.5 * mm)
 
-        # --- Khu vực thông tin bệnh nhân ---
-        # Dòng 1: Họ tên - Năm sinh - Giới tính
-        name_y = height - 35.5 * mm
-        c.setFont(VIET_FONT_BOLD, 10)
-        c.drawString(margin_left, name_y, _safe_text(data.get('HoTen')))
-        c.drawString(margin_left + 185, name_y, _safe_text(data.get('NamSinh')))
-        c.drawString(margin_left + 250, name_y, _safe_text(data.get('GioiTinh')))
+        name_y = content_y + content_height - 39 * mm
+        c.setFont(VIET_FONT_BOLD, 9.5)
+        c.drawString(content_x + 2 * mm, name_y, _safe_text(data.get('HoTen')))
+        c.drawString(content_x + 64 * mm, name_y, _safe_text(data.get('NamSinh')))
+        c.drawString(content_x + 80 * mm, name_y, _safe_text(data.get('GioiTinh')))
 
-        # Dòng 2: Mã số thẻ BHYT
         bhyt_y = name_y - 5.5 * mm
-        c.setFont(VIET_FONT, 10)
+        c.setFont(VIET_FONT, 9.5)
         label = 'Mã số thẻ BHYT: '
         bhyt_value = _safe_text(data.get('SoBHYT'))
-        c.drawString(margin_left, bhyt_y, label)
-        c.setFont(VIET_FONT_BOLD, 10)
-        c.drawString(margin_left + stringWidth(label, VIET_FONT, 10), bhyt_y, bhyt_value)
+        c.drawString(content_x + 2 * mm, bhyt_y, label)
+        c.setFont(VIET_FONT_BOLD, 9.5)
+        c.drawString(content_x + 2 * mm + stringWidth(label, VIET_FONT, 9.5), bhyt_y, bhyt_value)
 
-        # Dòng 3: Địa chỉ (Xử lý co giãn tự động và text wrap)
-        address_y = bhyt_y - 5.5 * mm
+        address_y = bhyt_y - 2.2 * mm
         address_value = _safe_text(data.get('DiaChi'))
-
         address_style = ParagraphStyle(
             name='AddressStyle',
             fontName=VIET_FONT,
-            fontSize= 10,
+            fontSize=9.5,
         )
         address_paragraph = Paragraph(f"Địa chỉ: <b>{address_value}</b>", address_style)
-        address_width = width - margin_left - margin_right
-        address_w, address_h = address_paragraph.wrap(address_width, 30 * mm)
-        address_paragraph.drawOn(c, margin_left, address_y - address_h + 2)
+        address_width = content_width - 4 * mm
+        _, address_h = address_paragraph.wrap(address_width, 20 * mm)
+        address_paragraph.drawOn(c, content_x + 2 * mm, address_y - address_h + 1)
 
-        # Dòng 4: Thời hạn bảo hiểm y tế
         bh_from_label = 'BH Từ ngày: '
         bh_to_label = 'BH Đến ngày: '
         bh_from_value = _safe_text(data.get('BHYT_Tu') or data.get('BHYTFrom') or data.get('BHYT_TuNgay'))
         bh_to_value = _safe_text(data.get('BHYT_Den') or data.get('BHYTTo') or data.get('BHYT_DenNgay'))
-        
-        # Tọa độ Y động tính dựa trên điểm kết thúc của khối Địa chỉ
-        date_y = address_y - address_h - 2.5 * mm
-        
-        # In đậm toàn bộ thông tin BH Từ ngày
-        c.setFont(VIET_FONT_BOLD, 10)
-        c.drawString(margin_left, date_y, bh_from_label)
-        c.drawString(margin_left + stringWidth(bh_from_label, VIET_FONT_BOLD, 10), date_y, bh_from_value)
-        
-        # In đậm toàn bộ thông tin BH Đến ngày
-        right_x = width / 2 + 2 * mm
-        c.drawString(right_x, date_y, bh_to_label)
-        c.drawString(right_x + stringWidth(bh_to_label, VIET_FONT_BOLD, 10), date_y, bh_to_value)
+
+        date_y = address_y - address_h - 3 * mm
+        c.setFont(VIET_FONT_BOLD, 9.5)
+        c.drawString(content_x + 2 * mm, date_y, bh_from_label)
+        c.drawString(content_x + 2 * mm + stringWidth(bh_from_label, VIET_FONT_BOLD, 9.5), date_y, bh_from_value)
+        c.drawString(content_x + 50 * mm, date_y, bh_to_label)
+        c.drawString(content_x + 50 * mm + stringWidth(bh_to_label, VIET_FONT_BOLD, 9.5), date_y, bh_to_value)
 
         c.showPage()
         c.save()

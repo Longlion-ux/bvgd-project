@@ -7,7 +7,7 @@
 
 
 from PyQt6 import QtCore, QtGui, QtWidgets
-
+from PyQt6.QtWidgets import QHeaderView
 
 class Ui_formDichVu(object):
     def setupUi(self, formDichVu):
@@ -390,6 +390,7 @@ class Ui_formDichVu(object):
         self.chan_doan.setPlaceholderText(_translate("formDichVu", "Nhập chẩn đoán..."))
         self.dateTimeEdit.setDisplayFormat(_translate("formDichVu", "dd/MM/yyyy HH:mm:ss"))
         self.ghi_chu.setPlaceholderText(_translate("formDichVu", "Nhập ghi chú..."))
+        self.table_dich_vu.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         item = self.table_dich_vu.horizontalHeaderItem(1)
         item.setText(_translate("formDichVu", "Mã"))
         item = self.table_dich_vu.horizontalHeaderItem(2)

@@ -5,7 +5,7 @@ from PyQt6 import QtCore, QtWidgets
 from PyQt6.QtSerialPort import QSerialPort
 from PyQt6.QtGui import QKeySequence, QRegularExpressionValidator, QShortcut
 from PyQt6.QtCore import QRegularExpression, QDate, QDateTime, QEvent, QTimer
-from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem
+from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem, QPushButton
 
 from app.styles.styles import ADD_BTN_STYLE, TUOI_STYLE, COMPLETER_THUOC_STYLE
 
@@ -18,6 +18,7 @@ from app.services.PhongBanService import get_list_phong_ban
 
 from app.ui.TabTiepNhan import Ui_formTiepNhan
 from app.utils.export_excel import export_tiep_nhan_and_show_dialog
+from app.utils.scanner_utils import parse_scanned_data, should_skip_scanner_input
 from app.utils.utils import calculate_age
 
 from app.utils.config_manager import ConfigManager
@@ -237,6 +238,8 @@ class TiepNhanTabController(QtWidgets.QWidget):
         self.ui_tiep_nhan.btn_refresh_history.clicked.connect(self._on_refresh_history)
         self.ui_tiep_nhan.btn_prev_page.clicked.connect(self.on_prev_page)
         self.ui_tiep_nhan.btn_next_page.clicked.connect(self.on_next_page)
+        self.ui_tiep_nhan.table.cellClicked.connect(self.on_history_row_clicked)
+        self.ui_tiep_nhan.table.cellDoubleClicked.connect(self.on_history_row_double_clicked)
         self.ui_tiep_nhan.table.cellDoubleClicked.connect(self.on_history_row_double_clicked)
         
         self.shortcut_reset = QShortcut(QKeySequence('Ctrl+N'), self.tab_widget_container)
@@ -496,6 +499,12 @@ class TiepNhanTabController(QtWidgets.QWidget):
         self.ui_tiep_nhan.btn_next_page.setEnabled(self.current_page_index < self.total_pages)
 
         self.ui_tiep_nhan.table.setRowCount(0)
+        self.ui_tiep_nhan.table.setColumnCount(10)
+        self.ui_tiep_nhan.table.setColumnWidth(9, 80)
+        self.ui_tiep_nhan.table.setHorizontalHeaderLabels([
+            'STT', 'Mã y tế', 'Họ tên', 'Tuổi', 'Giới tính',
+            'Phòng', 'Ngày giờ', 'Đối tượng', 'Số BHYT', 'Thao tác'
+        ])
         if total_items == 0:
             return
 
@@ -521,6 +530,11 @@ class TiepNhanTabController(QtWidgets.QWidget):
                 item.setData(QtCore.Qt.ItemDataRole.UserRole, record)
                 self.ui_tiep_nhan.table.setItem(row_index, col, item)
 
+            delete_button = QPushButton('Xoá')
+            delete_button.setProperty('record', record)
+            delete_button.clicked.connect(lambda _, rec=record: self._delete_history_record(rec))
+            self.ui_tiep_nhan.table.setCellWidget(row_index, 9, delete_button)
+
     def on_prev_page(self):
         if self.current_page_index > 1:
             self.current_page_index -= 1
@@ -531,7 +545,7 @@ class TiepNhanTabController(QtWidgets.QWidget):
             self.current_page_index += 1
             self.load_history_table()
 
-    def on_history_row_double_clicked(self, row, col):
+    def on_history_row_clicked(self, row, col):
         item = self.ui_tiep_nhan.table.item(row, 0)
         if not item:
             return
@@ -539,6 +553,36 @@ class TiepNhanTabController(QtWidgets.QWidget):
         if not record:
             return
         self.fill_form_from_history_record(record)
+
+    def on_history_row_double_clicked(self, row, col):
+        self.on_history_row_clicked(row, col)
+
+    def _delete_history_record(self, record):
+        if not record:
+            return
+
+        cccd = str(record.get('CCCD', '')).strip()
+        reply = QMessageBox.question(
+            self,
+            'Xác nhận xoá',
+            f'Bạn có muốn xoá bản ghi của {record.get("HoTen", "")} không?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            import pandas as pd
+            from app.core.tiep_nhan_benh_nhan import LICH_SU_TIEP_NHAN_FILE_PATH
+            df = pd.read_csv(LICH_SU_TIEP_NHAN_FILE_PATH, dtype=str)
+            if 'CCCD' in df.columns and cccd:
+                df = df[~df['CCCD'].astype(str).str.strip().eq(cccd)]
+            else:
+                df = df.iloc[:-1]
+            df.to_csv(LICH_SU_TIEP_NHAN_FILE_PATH, index=False, na_rep='')
+            self.load_history_table()
+        except Exception as e:
+            QMessageBox.warning(self, 'Lỗi xoá', str(e))
 
     def fill_form_from_history_record(self, record):
         self.ui_tiep_nhan.stt.setText(self._clean_numeric_string(record.get('STT')))
@@ -592,67 +636,50 @@ class TiepNhanTabController(QtWidgets.QWidget):
         self.is_processing_scan = True
 
         try:
-            # Loại bỏ khoảng trắng thừa ở đầu/cuối chuỗi QR nhận từ cổng COM
-            qr_text = qr_text.strip()
-            parts = [p.strip() for p in qr_text.split('|')]
-            
-            if len(parts) < 5:
+            scanned_data = parse_scanned_data(qr_text)
+            if not scanned_data:
                 return
 
-            ngay_sinh_raw = ""
-            date_index = -1
-            for i, part in enumerate(parts):
-                if len(part) == 8 and part.isdigit():
-                    ngay_sinh_raw = part
-                    date_index = i
-                    break
-            
-            if not ngay_sinh_raw and len(parts) > 4:
-                ngay_sinh_raw = parts[4]
-
-            cccd_code = parts[0]
-            
-            if date_index != -1:
-                # Nếu tìm thấy ngày sinh bằng thuật toán quét chuỗi số
-                ho_ten = parts[date_index - 1]
-                gioi_tinh = parts[date_index + 1] if date_index + 1 < len(parts) else ""
-                dia_chi = parts[date_index + 2] if date_index + 2 < len(parts) else ""
-            else:
-                # Nếu không tìm thấy, dùng index cố định an toàn
-                ho_ten = parts[2]
-                gioi_tinh = parts[3]
-                dia_chi = parts[5] if len(parts) > 5 else ""
+            cccd_code = scanned_data.get('cccd', '')
+            ho_ten = scanned_data.get('ho_ten', '')
+            gioi_tinh = scanned_data.get('gioi_tinh', '')
+            ngay_sinh_raw = scanned_data.get('ngay_sinh', '')
+            dia_chi = scanned_data.get('dia_chi', '')
 
             # Đổ dữ liệu lên UI
-            self.ui_tiep_nhan.cccd.setText(cccd_code)
-            self.ui_tiep_nhan.ho_ten.setText(ho_ten)
-            self.ui_tiep_nhan.dia_chi.setText(dia_chi)
+            if cccd_code:
+                self.ui_tiep_nhan.cccd.setText(cccd_code)
+            if ho_ten:
+                self.ui_tiep_nhan.ho_ten.setText(ho_ten)
+            if dia_chi:
+                self.ui_tiep_nhan.dia_chi.setText(dia_chi)
 
             # Chuẩn hóa giới tính
-            if hasattr(self, '_normalize_gioi_tinh'):
-                gioi_tinh_chuan = self._normalize_gioi_tinh(gioi_tinh)
+            normalize_gioi_tinh = getattr(type(self), '_normalize_gioi_tinh', None)
+            if callable(normalize_gioi_tinh):
+                gioi_tinh_chuan = normalize_gioi_tinh(self, gioi_tinh)
             else:
                 text_gt = str(gioi_tinh or '').strip().lower()
                 mapping_gt = {'nam': 'Nam', 'nu': 'Nữ', 'nữ': 'Nữ', 'g': 'Nữ', 'm': 'Nam'}
                 gioi_tinh_chuan = mapping_gt.get(text_gt, 'Nam')
-            
-            self.ui_tiep_nhan.gioi_tinh.setCurrentText(gioi_tinh_chuan)
+
+            if gioi_tinh_chuan:
+                self.ui_tiep_nhan.gioi_tinh.setCurrentText(gioi_tinh_chuan)
 
             # Phân tích ngày sinh
             date_parsed = self._parse_cccd_date(ngay_sinh_raw)
-            
+
             # Chỉ set ngày sinh nếu đã phân tích được ngày hợp lệ
             if date_parsed.isValid():
                 self.ui_tiep_nhan.nam_sinh.setDate(date_parsed)
-                if hasattr(self, 'update_tuoi'):
-                    self.update_tuoi()
-            else:
-                self.ui_tiep_nhan.nam_sinh.setDate(QDate.currentDate())
+                update_tuoi = self.__dict__.get('update_tuoi')
+                if callable(update_tuoi):
+                    update_tuoi()
 
         except Exception as e:
             QMessageBox.warning(
-                self, 
-                "Lỗi xử lý dữ liệu", 
+                self,
+                "Lỗi xử lý dữ liệu",
                 f"Đã xảy ra lỗi khi phân tách chuỗi CCCD: {str(e)}"
             )
         finally:

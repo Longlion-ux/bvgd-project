@@ -23,6 +23,7 @@ from app.ui.ThongBaoThongTuyenBHYT import Ui_Dialog as Ui_ThongBaoThongTuyenBHYT
 
 from app.utils.config_manager import ConfigManager
 from app.utils.cong_thuc_tinh_bhyt import tinh_tien_mien_giam
+from app.utils.scanner_utils import parse_scanned_data
 from app.utils.constants import MA_Y_TE_LENGTH, CLS_CODE
 from app.utils.ui_helpers import IcdCompleterHandler, DuocCompleterHandler
 from app.utils.utils import populate_combobox, \
@@ -1419,32 +1420,22 @@ class KhamBenhTabController(QtWidgets.QWidget):
         self.is_processing_scan = True
 
         try:
-            parts = [p.strip() for p in qr_text.strip().split('|')]
-            if len(parts) < 5:
+            scanned_data = parse_scanned_data(qr_text)
+            if not scanned_data:
                 return
 
-            # Định vị vị trí ngày sinh động
-            date_index = -1
-            for i, part in enumerate(parts):
-                if len(part) == 8 and part.isdigit():
-                    date_index = i
-                    break
+            cccd_code = scanned_data.get('cccd', '')
+            ho_ten = scanned_data.get('ho_ten', '')
+            gioi_tinh = scanned_data.get('gioi_tinh', '')
+            ngay_sinh_raw = scanned_data.get('ngay_sinh', '')
+            dia_chi = scanned_data.get('dia_chi', '')
 
-            cccd_code = parts[0]
-            if date_index != -1:
-                ho_ten = parts[date_index - 1]
-                gioi_tinh = parts[date_index + 1] if date_index + 1 < len(parts) else ""
-                dia_chi = parts[date_index + 2] if date_index + 2 < len(parts) else ""
-                ngay_sinh_raw = parts[date_index]
-            else:
-                ho_ten = parts[2]
-                gioi_tinh = parts[3]
-                dia_chi = parts[5] if len(parts) > 5 else ""
-                ngay_sinh_raw = parts[4] if len(parts) > 4 else ""
-
-            self.ui_kham.cccd.setText(cccd_code)
-            self.ui_kham.ho_ten_bn.setText(ho_ten)
-            self.ui_kham.dia_chi.setText(dia_chi)
+            if cccd_code:
+                self.ui_kham.cccd.setText(cccd_code)
+            if ho_ten:
+                self.ui_kham.ho_ten_bn.setText(ho_ten)
+            if dia_chi:
+                self.ui_kham.dia_chi.setText(dia_chi)
 
             # Gán giới tính
             if hasattr(self, '_normalize_gioi_tinh'):
@@ -1453,7 +1444,8 @@ class KhamBenhTabController(QtWidgets.QWidget):
                 text_gt = str(gioi_tinh or '').strip().lower()
                 mapping_gt = {'nam': 'Nam', 'nu': 'Nữ', 'nữ': 'Nữ', 'g': 'Nữ', 'm': 'Nam'}
                 gioi_tinh_chuan = mapping_gt.get(text_gt, 'Nam')
-            self.ui_kham.cb_gioi_tinh.setCurrentText(gioi_tinh_chuan)
+            if gioi_tinh_chuan:
+                self.ui_kham.cb_gioi_tinh.setCurrentText(gioi_tinh_chuan)
 
             # Xử lý năm sinh
             date_parsed = self._parse_cccd_date(ngay_sinh_raw)
@@ -1463,8 +1455,6 @@ class KhamBenhTabController(QtWidgets.QWidget):
                 # Gọi hàm tính tuổi của tab khám bệnh nếu có
                 if hasattr(self, 'update_tuoi'):
                     self.update_tuoi()
-
-            # QMessageBox.information(self, "Thành công", f"Đã nhận dạng bệnh nhân khám: {ho_ten}")
 
         except Exception as e:
             QMessageBox.warning(self, "Lỗi quét mã", f"Lỗi phân tích dữ liệu CCCD tại phòng khám: {str(e)}")

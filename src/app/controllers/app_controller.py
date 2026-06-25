@@ -12,6 +12,7 @@ from app.controllers.kham_benh_controller import KhamBenhTabController
 from app.controllers.tiep_nhan_controller import TiepNhanTabController
 
 from app.utils.constants import CLS_CODE
+from app.utils.scanner_port_manager import ScannerPortManager
 
 
 class AppController(QtWidgets.QWidget):
@@ -42,6 +43,11 @@ class AppController(QtWidgets.QWidget):
         self.tiep_nhan_controller = TiepNhanTabController(
             tab_widget_container=self.ui_main.tab_tiep_nhan
         )
+
+        self.scanner_port_manager = ScannerPortManager(self)
+        self.scanner_port_manager.register_controller('kham_benh', self.kham_benh_controller)
+        self.scanner_port_manager.register_controller('tiep_nhan', self.tiep_nhan_controller)
+        self.scanner_port_manager.register_controller('tai_vu', self.tai_vu_controller)
 
         self._apply_tab_stylesheet()
 
@@ -264,30 +270,14 @@ class AppController(QtWidgets.QWidget):
         self.kham_benh_controller.reset_all()
 
     def handle_tab_changed(self, index):
-        """Điều phối đóng/mở cổng COM6 linh hoạt không phụ thuộc vào thứ tự Index cứng"""
-        
-        # 1. Lấy đúng thực thể giao diện của Tab mà người dùng vừa click vào
+        """Điều phối đóng/mở cổng COM qua lớp quản lý dùng chung."""
         current_tab_widget = self.ui_main.tabWidget.widget(index)
 
-        # 2. Kiểm tra Tab hiện tại và thực hiện đóng/mở cổng COM6 tương ứng
         if current_tab_widget == self.ui_main.tab_kham_benh:
-            # Tắt Tab Tiếp nhận
-            if hasattr(self, 'tiep_nhan_controller'):
-                self.tiep_nhan_controller.close_serial_port()
-            if hasattr(self, 'kham_benh_controller'):
-                QTimer.singleShot(150, lambda: self.kham_benh_controller.open_serial_port())
-
+            self.scanner_port_manager.activate_tab('kham_benh')
         elif current_tab_widget == self.ui_main.tab_tiep_nhan:
-            # Tắt Tab Khám bệnh
-            if hasattr(self, 'kham_benh_controller'):
-                self.kham_benh_controller.close_serial_port()
-            
-            if hasattr(self, 'tiep_nhan_controller'):
-                QTimer.singleShot(150, lambda: self.tiep_nhan_controller.open_serial_port())
-
+            self.scanner_port_manager.activate_tab('tiep_nhan')
+        elif current_tab_widget == self.ui_main.tab_tai_vu:
+            self.scanner_port_manager.activate_tab('tai_vu')
         else:
-            # Nếu người dùng bấm vào các Tab khác. Ra lệnh ngắt COM6 để giải phóng tài nguyên
-            if hasattr(self, 'kham_benh_controller'):
-                self.kham_benh_controller.close_serial_port()
-            if hasattr(self, 'tiep_nhan_controller'):
-                self.tiep_nhan_controller.close_serial_port()
+            self.scanner_port_manager.activate_tab('')

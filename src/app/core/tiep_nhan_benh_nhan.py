@@ -55,7 +55,7 @@ def load_history_records():
 def luu_du_lieu_tiep_nhan(data: dict):
     """
     Lưu toàn bộ dữ liệu tiếp nhận từ biểu mẫu vào file CSV.
-    SỬA ĐỔI: Chuẩn hóa ép kiểu chuỗi độc lập cho STT, SDT, CCCD, BHYT và thêm dtype=str khi đọc file nối dữ liệu.
+    Nếu bản ghi đã tồn tại theo CCCD thì cập nhật thay vì tạo bản ghi mới.
     """
     data = dict(data)
     data['timestamp_luu'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -90,22 +90,31 @@ def luu_du_lieu_tiep_nhan(data: dict):
 
     # 3. Kiểm tra và Lưu file
     if os.path.exists(LICH_SU_TIEP_NHAN_FILE_PATH):
-        # Nếu file tồn tại, đọc file cũ và nối dữ liệu mới
         try:
-            # SỬA: Thêm dtype=str để ép Pandas đọc mọi thứ như chuỗi text, tránh mất số 0 và float
             df_hien_tai = pd.read_csv(LICH_SU_TIEP_NHAN_FILE_PATH, dtype=str)
-            
-            # SỬA: Xóa cột 'Phong' thừa (nếu đang dính từ file cũ)
+
             if 'Phong' in df_hien_tai.columns:
                 df_hien_tai = df_hien_tai.drop(columns=['Phong'])
             if 'Phong' in df_moi.columns:
                 df_moi = df_moi.drop(columns=['Phong'])
 
-            # SỬA: Dọn dẹp lỗi đuôi '.0' đã bị lưu vào file cũ trước đó
             if 'MaYTe' in df_hien_tai.columns:
                 df_hien_tai['MaYTe'] = df_hien_tai['MaYTe'].astype(str).str.replace(r'\.0$', '', regex=True)
             if 'Mã y tế' in df_hien_tai.columns:
                 df_hien_tai['Mã y tế'] = df_hien_tai['Mã y tế'].astype(str).str.replace(r'\.0$', '', regex=True)
+
+            cccd_value = str(data.get('CCCD', '')).strip()
+            if cccd_value:
+                existing_mask = df_hien_tai['CCCD'].fillna('').astype(str).str.strip() == cccd_value
+                if existing_mask.any():
+                    index_to_update = df_hien_tai.index[existing_mask][0]
+                    for col in df_moi.columns:
+                        if col in df_hien_tai.columns:
+                            df_hien_tai.at[index_to_update, col] = data.get(col, '')
+                    df_hien_tai = df_hien_tai.fillna('')
+                    df_hien_tai.to_csv(LICH_SU_TIEP_NHAN_FILE_PATH, index=False, na_rep='')
+                    print(f"SUCCESS: Đã cập nhật bản ghi có CCCD {cccd_value} tại {LICH_SU_TIEP_NHAN_FILE_PATH}.")
+                    return
 
             df_ket_hop = pd.concat([df_hien_tai, df_moi], ignore_index=True)
             df_ket_hop = df_ket_hop.fillna('')
@@ -115,14 +124,12 @@ def luu_du_lieu_tiep_nhan(data: dict):
             print(f"LỖI LƯU: Không thể đọc/ghi vào file {LICH_SU_TIEP_NHAN_FILE_PATH}. {e}")
 
     else:
-        # Nếu file chưa tồn tại, tạo file mới
         try:
             os.makedirs(os.path.dirname(str(LICH_SU_TIEP_NHAN_FILE_PATH)), exist_ok=True)
-            
-            # Xóa cột 'Phong' nếu có vô tình dính vào trước khi tạo mới
+
             if 'Phong' in df_moi.columns:
                 df_moi = df_moi.drop(columns=['Phong'])
-                
+
             df_moi = df_moi.fillna('')
             df_moi.to_csv(LICH_SU_TIEP_NHAN_FILE_PATH, index=False, na_rep='')
             print(f"SUCCESS: Đã tạo và lưu dữ liệu đầu tiên vào {LICH_SU_TIEP_NHAN_FILE_PATH}.")

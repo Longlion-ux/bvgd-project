@@ -521,7 +521,7 @@
          <number>0</number>
         </property>
         <property name="columnCount">
-         <number>9</number>
+         <number>10</number>
         </property>
         <column>
          <property name="text">
@@ -566,6 +566,11 @@
         <column>
          <property name="text">
           <string>Số BHYT</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Thao tác</string>
          </property>
         </column>
        </widget>

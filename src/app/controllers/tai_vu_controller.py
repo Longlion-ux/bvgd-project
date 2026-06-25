@@ -1,6 +1,7 @@
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtCore import QLocale, QDate, Qt, pyqtSignal
 from PyQt6.QtGui import QDoubleValidator
+from PyQt6.QtSerialPort import QSerialPort, QSerialPortInfo
 from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem, QWidget, QHBoxLayout, QCheckBox
 import sys
 
@@ -19,6 +20,7 @@ from app.utils.chuyen_tien_thanh_chu import chuyen_tien_thanh_chu
 from app.utils.config_manager import ConfigManager
 from app.utils.cong_thuc_tinh_bhyt import tinh_tien_mien_giam
 from app.utils.export_excel import export_and_show_dialog
+from app.utils.scanner_utils import parse_scanned_data
 from app.utils.utils import format_currency_vn, unformat_currency_to_float, calculate_age, populate_list_to_combobox
 from app.utils.write_json_line import write_json_lines, MODE_JSON
 from app.configs.table_dich_vu_configs import *
@@ -125,6 +127,76 @@ class TaiVuTabController(QtWidgets.QWidget):
         self.ui_tai_vu.ngay_thu.setDateTime(QtCore.QDateTime.currentDateTime())
 
     # </editor-fold>
+
+    def get_scanner_port_name(self):
+        available_ports = QSerialPortInfo.availablePorts()
+        if not available_ports:
+            return None
+
+        target_keywords = ['newland', 'barcode', 'scanner', 'symbol', 'honeywell', 'datalogic']
+        for port in available_ports:
+            desc = port.description().lower()
+            manu = port.manufacturer().lower()
+            if any(keyword in desc for keyword in target_keywords) or any(keyword in manu for keyword in target_keywords):
+                return port.portName()
+
+        for port in available_ports:
+            desc = port.description().lower()
+            if 'usb serial device' in desc or 'ch340' in desc or 'pl2303' in desc:
+                return port.portName()
+
+        return available_ports[-1].portName()
+
+    def setup_serial_scanner(self):
+        if not hasattr(self, 'serial') or self.serial is None:
+            self.serial = QSerialPort(self)
+            self.serial.readyRead.connect(self.read_serial_data)
+
+        if self.serial.isOpen():
+            self.serial.close()
+
+        target_port = self.get_scanner_port_name()
+        if not target_port:
+            print('Không tìm thấy cổng COM cho máy quét tại Tab Tài vụ.')
+            return
+
+        self.serial.setPortName(target_port)
+        self.serial.setBaudRate(9600)
+        if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
+            print(f'Đã kết nối máy quét thành công tại cổng {target_port} tại Tab Tài vụ.')
+        else:
+            print(f'Cảnh báo cổng {target_port} tại Tab Tài vụ: {self.serial.errorString()}')
+
+    def open_serial_port(self):
+        if hasattr(self, 'serial') and self.serial is not None:
+            if not self.serial.isOpen():
+                if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
+                    print(f'Đã mở lại cổng kết nối tại Tab Tài vụ.')
+                else:
+                    print(f'Tab Tài vụ: Lỗi mở lại cổng ({self.serial.errorString()})')
+        else:
+            self.setup_serial_scanner()
+
+    def close_serial_port(self):
+        if hasattr(self, 'serial') and self.serial is not None and self.serial.isOpen():
+            self.serial.close()
+            print('Đã đóng cổng kết nối tại Tab Tài vụ.')
+
+    def read_serial_data(self):
+        if not hasattr(self, 'serial_buffer'):
+            self.serial_buffer = b''
+
+        self.serial_buffer += self.serial.readAll().data()
+        try:
+            text = self.serial_buffer.decode('utf-8', errors='ignore')
+        except UnicodeDecodeError:
+            return
+
+        if '\r' in text or '\n' in text:
+            clean_text = text.strip()
+            if clean_text:
+                self.process_qr_data(clean_text)
+            self.serial_buffer = b''
 
     def setup_table_dich_vu(self):
         table = self.ui_tai_vu.table_dich_vu
@@ -304,6 +376,45 @@ class TaiVuTabController(QtWidgets.QWidget):
         data_parts = {}
 
         try:
+            scanned_data = parse_scanned_data(data)
+
+            if scanned_data and (scanned_data.get('ma_y_te') or scanned_data.get('ho_ten') or scanned_data.get('bill_type') or scanned_data.get('ds_string')):
+                if scanned_data.get('ma_y_te'):
+                    ui.ma_y_te.setText(scanned_data.get('ma_y_te', ''))
+                if scanned_data.get('ho_ten'):
+                    ui.ho_ten.setText(scanned_data.get('ho_ten', ''))
+                if scanned_data.get('dia_chi'):
+                    ui.dia_chi.setText(scanned_data.get('dia_chi', ''))
+                if scanned_data.get('tuoi'):
+                    ui.tuoi.setText(str(scanned_data.get('tuoi', '')))
+                if scanned_data.get('bhyt'):
+                    self.bhyt = scanned_data.get('bhyt', '')
+
+                ma_dt = scanned_data.get('ma_dt', '')
+                if ma_dt:
+                    index = ui.cb_doi_tuong.findData(ma_dt)
+                    if index != -1:
+                        ui.cb_doi_tuong.setCurrentIndex(index)
+                    else:
+                        index = ui.cb_doi_tuong.findText(ma_dt)
+                        if index != -1:
+                            ui.cb_doi_tuong.setCurrentIndex(index)
+
+                tong_tien_raw = scanned_data.get('tien', '')
+                if tong_tien_raw:
+                    tong_tien_input = (tong_tien_raw.replace(' VND', '')
+                                       .replace('.', '')
+                                       .replace(',', '.'))
+                    ui.tong_so_tien.setText(tong_tien_input)
+                    self.format_tong_so_tien()
+
+                bill_type = scanned_data.get('bill_type', '')
+                ds_string = scanned_data.get('ds_string', '')
+                if bill_type and ds_string:
+                    self.load_items_from_qr(bill_type, ds_string)
+                ui.tong_so_tien.setFocus()
+                return
+
             # Tách chuỗi bằng dấu '|'
             pairs = data.split('|')
             for pair in pairs:
@@ -340,7 +451,6 @@ class TaiVuTabController(QtWidgets.QWidget):
             if bill_type and ds_string:
                 self.load_items_from_qr(bill_type, ds_string)
 
-            # (Tùy chọn) Sau khi quét xong, chuyển focus sang nút in hoặc ô tiền
             ui.tong_so_tien.setFocus()
 
         except Exception as e:
