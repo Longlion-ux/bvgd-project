@@ -68,11 +68,11 @@ def create_and_open_pdf_for_printing(data):
 
         qr_size = 24 * mm
         qr_x = content_x + content_width - qr_size - 3 * mm
-        qr_y = content_y + content_height - qr_size - 6 * mm
+        qr_y = content_y + content_height - qr_size - 2 * mm
 
         c.setFont(VIET_FONT_BOLD, 10)
-        c.drawString(content_x + 2 * mm, content_y + content_height - 8 * mm, _safe_text(data.get('TenBenhVien', 'BỆNH VIỆN')))
-        c.drawString(content_x + 2 * mm, content_y + content_height - 13 * mm, _safe_text(data.get('PhongTiepNhan', data.get('Phong', 'PHÒNG KHÁM'))))
+        c.drawString(content_x + 2 * mm, content_y + content_height - 6 * mm, _safe_text(data.get('TenBenhVien', 'BỆNH VIỆN')))
+        c.drawString(content_x + 2 * mm, content_y + content_height - 11 * mm, _safe_text(data.get('PhongTiepNhan', data.get('Phong', 'PHÒNG KHÁM'))))
 
         qr_path = generate_medical_qr_code(
             ma_y_te=data.get('MaYTe', ''),
@@ -115,9 +115,9 @@ def create_and_open_pdf_for_printing(data):
             qr_text_p = Paragraph("<br/>".join(qr_labels), qr_text_style)
             qr_box_width = qr_size + 4 * mm
             _, ql_h = qr_text_p.wrap(qr_box_width, 18 * mm)
-            qr_text_p.drawOn(c, qr_x + (qr_size / 2) - (qr_box_width / 2), qr_y - ql_h - 1.5 * mm)
+            qr_text_p.drawOn(c, qr_x + (qr_size / 2) - (qr_box_width / 2), qr_y - ql_h - 0 * mm)
 
-        name_y = content_y + content_height - 39 * mm
+        name_y = content_y + content_height - 40 * mm
         c.setFont(VIET_FONT_BOLD, 9.5)
         c.drawString(content_x + 2 * mm, name_y, _safe_text(data.get('HoTen')))
         c.drawString(content_x + 64 * mm, name_y, _safe_text(data.get('NamSinh')))

@@ -1,7 +1,7 @@
-import pandas as pd
 import os
 from datetime import datetime
 
+import pandas as pd
 from PyQt6.QtWidgets import QComboBox
 
 from app.utils.get_file_path import get_file_path
@@ -51,6 +51,60 @@ def load_history_records():
         return pd.read_csv(LICH_SU_TIEP_NHAN_FILE_PATH).to_dict('records')
     except Exception:
         return []
+
+
+def _normalize_cell(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ''
+    return str(value).strip()
+
+
+def _record_identity_fields(record: dict):
+    base_fields = [
+        'timestamp_luu', 'STT', 'MaYTe', 'HoTen', 'Tuoi', 'GioiTinh',
+        'PhongTiepNhan', 'NgayTiepNhan', 'DoiTuong', 'SoBHYT', 'CCCD'
+    ]
+    return tuple(_normalize_cell(record.get(field, '')) for field in base_fields)
+
+
+def remove_history_record_by_identity(file_path: str, record: dict) -> bool:
+    """Xoá bản ghi tiếp nhận bằng định danh ổn định, không phụ thuộc vào cột CCCD rỗng."""
+    if not record:
+        return False
+
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return False
+
+    try:
+        df = pd.read_csv(file_path, dtype=str)
+        if df.empty:
+            return False
+
+        identity = _record_identity_fields(record)
+        if not identity or not any(identity):
+            return False
+
+        timestamp_luu = _normalize_cell(record.get('timestamp_luu'))
+        if timestamp_luu:
+            mask = df['timestamp_luu'].fillna('').astype(str).str.strip() != timestamp_luu
+        else:
+            def row_matches(row):
+                row_identity = tuple(_normalize_cell(row.get(field, '')) for field in [
+                    'timestamp_luu', 'STT', 'MaYTe', 'HoTen', 'Tuoi', 'GioiTinh',
+                    'PhongTiepNhan', 'NgayTiepNhan', 'DoiTuong', 'SoBHYT', 'CCCD'
+                ])
+                return row_identity != identity
+
+            mask = df.apply(row_matches, axis=1)
+
+        df = df[mask]
+        df = df.fillna('')
+        df.to_csv(file_path, index=False, na_rep='')
+        return True
+    except Exception as exc:
+        print(f"LỖI XOÁ LỊCH SỬ: {exc}")
+        return False
+
 
 def luu_du_lieu_tiep_nhan(data: dict):
     """

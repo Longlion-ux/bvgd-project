@@ -111,6 +111,12 @@ class KhamBenhTabController(QtWidgets.QWidget):
         # </editor-fold>
 
         self.is_processing_scan = False
+        self._scanner_open_retry_count = 0
+        self._scanner_open_in_progress = False
+        self._scanner_open_attempted = False
+        self._scanner_open_timer = QTimer(self)
+        self._scanner_open_timer.setSingleShot(True)
+        self._scanner_open_timer.timeout.connect(self._attempt_open_serial_port)
 
     # </editor-fold>
 
@@ -1346,53 +1352,63 @@ class KhamBenhTabController(QtWidgets.QWidget):
             if 'usb serial device' in desc or 'ch340' in desc or 'pl2303' in desc:
                 return port.portName()
 
-        # Nếu không tìm thấy cổng nào phù hợp, trả về cổng cuối cùng trong danh sách
-        return available_ports[-1].portName()
+        # Không tự động thử các cổng chung như COM4 khi chưa xác định là máy quét.
+        return None
+
+    def _schedule_serial_open(self, delay_ms=0):
+        self._scanner_open_attempted = False
+        self._scanner_open_in_progress = False
+        if self._scanner_open_timer.isActive():
+            return
+        self._scanner_open_timer.start(delay_ms)
+
+    def _attempt_open_serial_port(self):
+        if self._scanner_open_in_progress or self._scanner_open_attempted:
+            return
+
+        self._scanner_open_attempted = True
+        self._scanner_open_in_progress = True
+        try:
+            if not hasattr(self, 'serial') or self.serial is None:
+                self.serial = QSerialPort(self)
+                self.serial.readyRead.connect(self.read_serial_data)
+
+            if self.serial.isOpen():
+                return
+
+            target_port = self.get_scanner_port_name()
+            if not target_port:
+                return
+
+            self.serial.setPortName(target_port)
+            self.serial.setBaudRate(9600)
+            self.serial.setDataBits(QSerialPort.DataBits.Data8)
+            self.serial.setParity(QSerialPort.Parity.NoParity)
+            self.serial.setStopBits(QSerialPort.StopBits.OneStop)
+            self.serial.setFlowControl(QSerialPort.FlowControl.NoFlowControl)
+            if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
+                self._scanner_open_retry_count = 0
+            else:
+                self._scanner_open_retry_count += 1
+                self.serial.close()
+        finally:
+            self._scanner_open_in_progress = False
 
     def setup_serial_scanner(self):
         """Khởi tạo và cấu hình cổng COM đọc dữ liệu từ máy quét"""
-        # Nếu chưa có đối tượng serial thì mới tạo mới hoàn toàn
-        if not hasattr(self, 'serial') or self.serial is None:
-            self.serial = QSerialPort(self)
-            self.serial.readyRead.connect(self.read_serial_data)
-
-        # Nếu cổng đang mở, đóng lại trước khi tái cấu hình để tránh xung đột bận cổng
-        if self.serial.isOpen():
-            self.serial.close()
-
-        # Tự động tìm cổng COM của máy quét Newland
-        target_port = self.get_scanner_port_name()
-        
-        if not target_port:
-            print("Không tìm thấy máy quét nào được cắm vào máy tính.")
-            return
-
-        self.serial.setPortName(target_port) # Gán tự động COM4, COM6...
-        self.serial.setBaudRate(9600)
-        
-        if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
-            print(f"Đã kết nối máy quét thành công tại cổng {target_port} thành công tại Tab Khám bệnh.")
-        else:
-            print(f"Cảnh báo cổng {target_port}  tại Tab Khám bệnh: {self.serial.errorString()}. Vui lòng kiểm tra cắm dây máy quét.")
+        self._schedule_serial_open(0)
 
     def open_serial_port(self):
         """Mở lại cổng COM tại Tab Khám bệnh"""
-
-        # Tự động tìm cổng COM của máy quét Newland
-        target_port = self.get_scanner_port_name()
-
-        if hasattr(self, 'serial') and self.serial is not None:
-            if not self.serial.isOpen():
-                # ĐÃ SỬA THỤT LỀ LOGIC TẠI ĐÂY
-                if self.serial.open(QSerialPort.OpenModeFlag.ReadOnly):
-                    print(f"Đã mở lại cổng kết nối {target_port} tại Tab Khám bệnh.")
-                else:
-                    print(f"Tab Khám bệnh: Lỗi mở lại cổng ({self.serial.errorString()})")
-        else:
-            self.setup_serial_scanner()
+        self._scanner_open_attempted = False
+        self._scanner_open_in_progress = False
+        self._schedule_serial_open(0)
 
     def close_serial_port(self):
         """Đóng cổng COM khi ẩn Tab Khám bệnh"""
+        self._scanner_open_timer.stop()
+        self._scanner_open_attempted = False
+        self._scanner_open_in_progress = False
         if hasattr(self, 'serial') and self.serial is not None:
             if self.serial.isOpen():
                 self.serial.close()

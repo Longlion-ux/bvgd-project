@@ -28,6 +28,20 @@ class AppController(QtWidgets.QWidget):
 
         self.ui_main.tabWidget.currentChanged.connect(self.handle_tab_changed)
 
+        self.scanner_port_manager = ScannerPortManager(self)
+        self._controllers_ready = False
+
+        self._apply_tab_stylesheet()
+
+        self.ui_main.tabWidget.setCurrentIndex(0)
+        self.showMaximized()
+
+        QTimer.singleShot(0, self._initialize_controllers)
+
+    def _initialize_controllers(self):
+        if self._controllers_ready:
+            return
+
         self.kham_benh_controller = KhamBenhTabController(
             tab_widget_container=self.ui_main.tab_kham_benh
         )
@@ -44,21 +58,18 @@ class AppController(QtWidgets.QWidget):
             tab_widget_container=self.ui_main.tab_tiep_nhan
         )
 
-        self.scanner_port_manager = ScannerPortManager(self)
         self.scanner_port_manager.register_controller('kham_benh', self.kham_benh_controller)
         self.scanner_port_manager.register_controller('tiep_nhan', self.tiep_nhan_controller)
         self.scanner_port_manager.register_controller('tai_vu', self.tai_vu_controller)
 
-        self._apply_tab_stylesheet()
-
         self.dich_vu_controller.dich_vu_completed.connect(self.handle_dich_vu_completed)
         self.kham_benh_controller.req_dang_ky_cls.connect(self.handle_f5_shortcut)
-        self.tai_vu_controller.req_dang_ky_cls.connect(lambda : self.handle_f5_shortcut(mode='tai_vu'))
+        self.tai_vu_controller.req_dang_ky_cls.connect(lambda: self.handle_f5_shortcut(mode='tai_vu'))
         self.kham_benh_controller.req_load_service_bill.connect(self.dich_vu_controller.load_data_from_service_bill)
         self.kham_benh_controller.req_reset_dich_vu.connect(self.dich_vu_controller.reset_all)
 
-        self.ui_main.tabWidget.setCurrentIndex(0)
-        self.showMaximized()
+        self._controllers_ready = True
+        self.handle_tab_changed(self.ui_main.tabWidget.currentIndex())
 
 
     def _apply_tab_stylesheet(self):
@@ -271,6 +282,9 @@ class AppController(QtWidgets.QWidget):
 
     def handle_tab_changed(self, index):
         """Điều phối đóng/mở cổng COM qua lớp quản lý dùng chung."""
+        if not getattr(self, '_controllers_ready', False):
+            return
+
         current_tab_widget = self.ui_main.tabWidget.widget(index)
 
         if current_tab_widget == self.ui_main.tab_kham_benh:
